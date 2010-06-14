@@ -26,7 +26,7 @@ JsonCpp - http://sourceforge.net/projects/jsoncpp/
 CouchDB - http://couchdb.apache.org/ (tested with 0.11)
 SpiderMonkey (as per CouchDB)
 
-Build with either Visual Studio or Unix Make not 
+Build with either Visual Studio or Unix Make 
 
 **************
 Configuration 
