@@ -1,0 +1,58 @@
+***************
+couchdb-lucene
+***************
+
+version 0.1 - 06/14/2010
+
+*******
+Thanks
+*******
+
+http://www.ittvis.com for permitting the initial release of this code to the public domain and giving me work time to do this.
+
+Robert Newson - explaining how the initial java lucene for couchdb works
+
+Itamar Syn-Hershko - helping me through some CLucene problems I was having
+
+and the whole team behind CouchDB
+
+
+*************
+Requirements
+*************
+
+CLucene - http://clucene.sourceforge.net/download.shtml#2_3_2
+JsonCpp - http://sourceforge.net/projects/jsoncpp/
+CouchDB - http://couchdb.apache.org/ (tested with 0.11)
+SpiderMonkey (as per CouchDB)
+
+Build with either Visual Studio or Unix Make not 
+
+**************
+Configuration 
+**************
+
+Tested on both Windows and Linux (executable name followed by folder to store clucene indexes, e.g. a database called 'test would be stored in c:/tmp/test in the example below)
+
+[external]
+fti=/workspace/fti/Release/fti.exe c:/tmp query
+
+[update_notification]
+update_fti=/workspace/fti/Release/fti.exe c:/tmp update
+
+*****
+demo
+*****
+
+Start CouchDB
+in demo folder run python loader.py and this will create a flickr database and put the latest photo entries and tags into CouchDB. Note this is a live feed, I am not responsible for content of this feed.
+
+e.g. curl http://localhost:5984/flickr/_fti/by_tag?q=jer* to find all tags that start with jer*
+
+supports, include_docs=true and skip, limit requests.
+
+
+
+
+
+

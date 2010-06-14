@@ -1,0 +1,11 @@
+{
+   "_id": "_design/fti",
+   "fulltext": {
+       "by_tag": {
+           "defaults": {
+               "store": "yes"
+           },
+           "index": "function(doc) {return {\"value\": doc.tags}}"
+       }
+   }
+}
