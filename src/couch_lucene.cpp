@@ -708,6 +708,37 @@ void CouchLuceneQuery::get_doc(const char* db, const char* id, string& result)
 	}
 }
 
+void CouchLuceneQuery::get_bulk_docs(const char* db, const char* json_request, string& result)
+{
+	CURL *curl_handle;
+	CURLcode res;
+	ostringstream url;
+
+	// clear global response buffer
+	struct write_result write_result;
+
+	url << COUCH_HOST << db << "/" << "_all_docs?include_docs=true";
+
+	curl_handle = curl_easy_init();
+	if (curl_handle) 
+	{
+		const std::string& tmp = url.str();
+		const char* url_str = tmp.c_str();
+
+		curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, curl_write);
+		curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, &write_result);
+		curl_easy_setopt(curl_handle, CURLOPT_POST, 1);
+		curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, json_request);
+		curl_easy_setopt(curl_handle, CURLOPT_URL, url_str);
+		res = curl_easy_perform(curl_handle);
+
+		// parse the response
+        //istringstream resultstream(write_result.buffer);
+		curl_easy_cleanup(curl_handle);
+		result = string(write_result.buffer);
+	}
+}
+
 void CouchLuceneQuery::handle_request(const string &request)
 {
 /*
@@ -818,6 +849,9 @@ void CouchLuceneQuery::handle_request(const string &request)
 				Json::Value objResult;
 				Json::Value rows;
 
+				// create a json array of all document ids
+				Json::Value docIds;
+
 				if (h->length() > 0)
 				{
 
@@ -832,7 +866,7 @@ void CouchLuceneQuery::handle_request(const string &request)
 					wstringstream wresultstream;
 					wresultstream << end;
 
-					for ( int32_t i = start; i < end;i++ ){
+					for (int32_t i = start; i < end;i++ ){
 
 						Document* doc = &h->doc(i);
 						Json::Value obj;
@@ -857,9 +891,11 @@ void CouchLuceneQuery::handle_request(const string &request)
 							if ((include_docs.isNull() == false) && (include_docs.asBool() == true))
 							{
 								// add the doc
-								string result_doc;
-								get_doc(db.c_str(), id.c_str(), result_doc);
-								obj["doc"] = result_doc;
+								// string result_doc;
+								//get_doc(db.c_str(), id.c_str(), result_doc);
+								//obj["doc"] = result_doc;
+								// store doc id for bulk fetch later
+								docIds[i] = id.c_str();
 							}
 
 						}
@@ -880,6 +916,34 @@ void CouchLuceneQuery::handle_request(const string &request)
 				}
 				else
 				{
+					// do we need to bulk fetch the documents for inclusion
+					if (docIds.size() > 0)
+					{
+						// make a bulk document request
+						// format is {"keys":["bar","baz"]}
+						Json::Value keys;
+						keys["keys"] = docIds;
+						Json::FastWriter wrtr;
+						string json_request = wrtr.write(keys);
+
+						string result_doc;
+						get_bulk_docs(db.c_str(), json_request.c_str(), result_doc);
+
+						// parse the result
+						Json::Reader rdr;
+						Json::Value resultRoot;
+						istringstream resultstream(result_doc); 
+						bool success = rdr.parse(resultstream, resultRoot);
+						if (success)
+						{
+							for (int i = 0; i < rows.size(); i++)
+							{
+								rows[i]["doc"] = resultRoot["rows"][i]["doc"];
+							}
+						}
+						
+					}
+
 					objResult["code"] = 200;
 					objResult["json"]["rows"] = rows;
 

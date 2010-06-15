@@ -28,6 +28,7 @@ public:
 class CouchLuceneQuery : public CouchLucene {
 protected:
 	void get_doc(const char* db, const char* id, string& result);
+	void get_bulk_docs(const char* db, const char* json_request, string& result);
 public:
     CouchLuceneQuery(string* dir);
 	~CouchLuceneQuery();
