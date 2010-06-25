@@ -316,8 +316,9 @@ long CouchLuceneUpdater::addChanges(const char* target, const char* since_seq_nu
 
 	  if (parsingSuccessful)
 	  {
+		
 		// query by doc id
-		  QueryParser* qp = _CLNEW QueryParser(WID_FIELD.c_str(), &an);
+		QueryParser* qp = _CLNEW QueryParser(WID_FIELD.c_str(), &an);
 		
 		const Json::Value arrayChanges = root["results"];
 
@@ -342,125 +343,131 @@ long CouchLuceneUpdater::addChanges(const char* target, const char* since_seq_nu
 				wostringstream wStr;
 				wStr << id.c_str();
 				const wstring wtmp = wStr.str();
-				const TCHAR* wId_string = wtmp.c_str();
 
-				if (IndexReader::isLocked(target) == true)
-					IndexReader::unlock(target);
-
-				// read the current seq_num
-				reader = IndexReader::open(target);
-				IndexSearcher searcher(reader);
-
-				Query* q = qp->parse(wId_string);
-				Hits* h = searcher.search(q);
-
-				if (h->length() > 0)
+				// you can write (at the moment) a design document with a null id
+				if (wtmp.length() > 0)
 				{
-					// remove existing document
-					Document doc = h->doc(0);
-					Term* t1 = _CLNEW Term(WID_FIELD.c_str(), wId_string);
-					reader->deleteDocuments(t1);
-					reader->flush();
-					_CLDECDELETE(t1);
-				}
-
-				searcher.close();
-				reader->close();
-
-				_CLDELETE(reader);
-				_CLDELETE(h);
-				_CLDELETE(q);
 				
-				// if objChanges is not marked as deleted then it add it back
-				Json::Value deletedValue;
-				deletedValue = objChange.get("deleted", false);
+					const TCHAR* wId_string = wtmp.c_str();
 
-				if (deletedValue.asBool() == false)
-				{
-					// not marked as deleted
-					// so add the document back	
-					Document newdoc;
-					wostringstream widstream;
-					widstream << id.c_str();
-					const wstring wid = widstream.str();
+					if (IndexReader::isLocked(target) == true)
+						IndexReader::unlock(target);
 
-					newdoc.add(*_CLNEW Field(WID_FIELD.c_str(), wId_string, 
-						Field::STORE_YES));
-					
-					// get the index functions and names for this db
-					// dbName, (designId, (term, {defaults, script}))
-					// map<string, map <string, FtiDefn > >  , designId, (term, defaults)
-					map<string, map <string, string > > queryMap = ftiMap[*dbName];
+					// read the current seq_num
+					reader = IndexReader::open(target);
+					IndexSearcher searcher(reader);
 
-					for (map<string, map <string, string > >::iterator i = queryMap.begin(); i != queryMap.end(); i++)
+					Query* q = qp->parse(wId_string);
+					Hits* h = searcher.search(q);
+
+					if (h->length() > 0)
 					{
-						// i->first; designId
-						// i->second; term, defaults
-						map<string, string> termMap = i->second;
+						// remove existing document
+						Document doc = h->doc(0);
+						Term* t1 = _CLNEW Term(WID_FIELD.c_str(), wId_string);
+						reader->deleteDocuments(t1);
+						reader->flush();
+						_CLDECDELETE(t1);
+					}
 
-						for (map<string, string>::iterator iFti = termMap.begin(); iFti != termMap.end();  iFti++)
-						{	
-							jsval jsresult;
-							char *filename = NULL;
-							uintN lineno = 0;
-							JSBool ok;
-				
-							string term = iFti->first;
-							string defaults = termMap[term];
+					searcher.close();
+					reader->close();
 
-							// put the current doc in scope
-							ostringstream js;
-							js << "var doc = ";
-							js << docStr << ";" << endl;
-							
-							// term is the prototype so we can the function
-							js << term.c_str() << "(doc);" << endl;
+					_CLDELETE(reader);
+					_CLDELETE(h);
+					_CLDELETE(q);
+					
+					// if objChanges is not marked as deleted then it add it back
+					Json::Value deletedValue;
+					deletedValue = objChange.get("deleted", false);
 
-							const std::string tmp = js.str();
-							const char* js_str = tmp.c_str();
+					if (deletedValue.asBool() == false)
+					{
+						// not marked as deleted
+						// so add the document back	
+						Document newdoc;
+						wostringstream widstream;
+						widstream << id.c_str();
+						const wstring wid = widstream.str();
 
-							ok = JS_EvaluateScript(cx, global, js_str, strlen(js_str),
-												filename, lineno, &jsresult);
+						newdoc.add(*_CLNEW Field(WID_FIELD.c_str(), wId_string, 
+							Field::STORE_YES));
+						
+						// get the index functions and names for this db
+						// dbName, (designId, (term, {defaults, script}))
+						// map<string, map <string, FtiDefn > >  , designId, (term, defaults)
+						map<string, map <string, string > > queryMap = ftiMap[*dbName];
 
-							if (ok)
-							{
-								// result is either a JSON structure
-								// {"value": _, "type": _, "field": _}
-								// just a string
-								wostringstream wv;
+						for (map<string, map <string, string > >::iterator i = queryMap.begin(); i != queryMap.end(); i++)
+						{
+							// i->first; designId
+							// i->second; term, defaults
+							map<string, string> termMap = i->second;
 
-								if (JSVAL_IS_OBJECT(jsresult) && !JSVAL_IS_NULL(jsresult))
+							for (map<string, string>::iterator iFti = termMap.begin(); iFti != termMap.end();  iFti++)
+							{	
+								jsval jsresult;
+								char *filename = NULL;
+								uintN lineno = 0;
+								JSBool ok;
+					
+								string term = iFti->first;
+								string defaults = termMap[term];
+
+								// put the current doc in scope
+								ostringstream js;
+								js << "var doc = ";
+								js << docStr << ";" << endl;
+								
+								// term is the prototype so we can the function
+								js << term.c_str() << "(doc);" << endl;
+
+								const std::string tmp = js.str();
+								const char* js_str = tmp.c_str();
+								
+								ok = JS_EvaluateScript(cx, global, js_str, strlen(js_str),
+													filename, lineno, &jsresult);
+
+								if (ok)
 								{
-									jsval val;
-									JSObject* obj = (JSObject*)jsresult;
-									JS_GetProperty(cx, obj, "value", &val);
-									wv << JS_GetStringBytes(JS_ValueToString(cx, val));
-								}
-								else
-								{
-									wv << JS_GetStringBytes(JS_ValueToString(cx, jsresult));
-								}
+									// result is either a JSON structure
+									// {"value": _, "type": _, "field": _}
+									// just a string
+									wostringstream wv;
 
-								const std::wstring& wtmp = wv.str();
+									if (JSVAL_IS_OBJECT(jsresult) && !JSVAL_IS_NULL(jsresult))
+									{
+										jsval val;
+										JSObject* obj = (JSObject*)jsresult;
+										JS_GetProperty(cx, obj, "value", &val);
+										wv << JS_GetStringBytes(JS_ValueToString(cx, val));
+									}
+									else
+									{
+										wv << JS_GetStringBytes(JS_ValueToString(cx, jsresult));
+									}
 
-								if (wtmp.compare(L"undefined") != 0)
-								{
-									const TCHAR* wval = wtmp.c_str();
+									const std::wstring& wtmp = wv.str();
 
-									wostringstream wTermStream;
-									wTermStream << term.c_str();
-									const std::wstring& wTerm = wTermStream.str();
+									if (wtmp.compare(L"undefined") != 0)
+									{
+										const TCHAR* wval = wtmp.c_str();
 
-									// add term and value to lucene index
-									newdoc.add(*_CLNEW Field(wTerm.c_str(), wval, Field::STORE_YES | Field::INDEX_TOKENIZED));							
+										wostringstream wTermStream;
+										wTermStream << term.c_str();
+										const std::wstring& wTerm = wTermStream.str();
+
+										// add term and value to lucene index
+										newdoc.add(*_CLNEW Field(wTerm.c_str(), wval, Field::STORE_YES | Field::INDEX_TOKENIZED));							
+									}
 								}
 							}
 						}
-					}
-					
-					JS_MaybeGC(cx);
+						
+						JS_MaybeGC(cx);
 
-					write_doc(target, &newdoc, &an, false);
+						write_doc(target, &newdoc, &an, false);
+					}
 				}
 			}
 			else
@@ -551,7 +558,6 @@ void CouchLuceneUpdater::parseFTI(const string* dbName, const string* designDocN
 
 			ok = JS_EvaluateScript(cx, global, js_string , strlen(js_string),
 											filename, lineno, &result);
-
 			if (!ok)
 				cerr << "FTI - Error parsing script" << js_string << endl;
 
