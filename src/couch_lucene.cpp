@@ -2,6 +2,16 @@
 
 #include "couch_lucene.h"
 
+#ifdef _MSC_VER
+    #include <direct.h>
+    #define RMDIR(d) _rmdir(d)
+#elif unix
+    #include <unistd.h>
+    #include <sys/stat.h>
+    #include <sys/types.h>
+    #define RMDIR(d) rmdir(d)
+#endif
+
 using namespace lucene::index;
 using namespace lucene::analysis;
 using namespace lucene::util;
@@ -86,25 +96,36 @@ void CouchLucene::handle_request(const string &request)
     istringstream requeststream(request); 
 	bool parsingSuccessful = reader.parse(requeststream, root);
 
+    Json::Value response;
+    
 	if (parsingSuccessful)
 	{
 		// echo request back to caller
 		// {"code": 200, "json": request, "headers": {}})
-		Json::Value response;
 		response["code"] = 200;
 		response["json"] = root;
-		
-		Json::FastWriter writer;
-		// Make a new JSON document.
-		std::string output = writer.write( response );
-		cout << output.c_str() << endl;
 	}
 	else
 	{
-		// TODO format error json, strip out all newlines
-		//reader.getFormatedErrorMessages();
-		cerr << "JSON PARSE ERROR " << request.c_str() << endl;
+        response["code"] = 400;
+        response["body"] = reader.getFormatedErrorMessages();
+        
 	}
+
+    Json::FastWriter writer;
+    // Make a new JSON document.
+    std::string output = writer.write( response );
+    cout << output.c_str() << endl;
+}
+void CouchLucene::write_error(const string &err, int code)
+{
+	Json::Value response;
+    response["code"] = code;
+    response["body"] = err;
+    Json::FastWriter writer;
+    // Make a new JSON document.
+    std::string output = writer.write( response );
+    cout << output.c_str() << endl;
 }
 
 /***************************************************
@@ -112,9 +133,10 @@ void CouchLucene::handle_request(const string &request)
 * CouchLuceneUpdater
 *
 *****************************************************/
-CouchLuceneUpdater::CouchLuceneUpdater(string* dir)
+CouchLuceneUpdater::CouchLuceneUpdater(string* dir, int count)
 {
 	indexDir = dir;
+	optimize_count = count;
 
 	// initialise the js engine
 	 /* Create a JS runtime. */
@@ -153,26 +175,121 @@ CouchLuceneUpdater::~CouchLuceneUpdater()
 void CouchLuceneUpdater::handle_request(const string &request)
 {
 	// { "type" : "updated", "db" : "test" } }
+	// or {"type": "deleted", "db", "test" } }
 	Json::Value root;   // contains the root value after parsing.
 	Json::Reader reader;
 	istringstream requeststream(request); 
 	bool parsingSuccessful = reader.parse(requeststream, root);
+	std::stringstream tmpStr;
 
 	if (parsingSuccessful)
 	{
 
 		// get the dbName
 		string dbName = root["db"].asString();
-		update_index(dbName);
+		string type = root["type"].asString();
+        
+		if (type.compare("updated") == 0)
+		{
+			// find the counter for this db
+			map<string, int>::iterator itr = updateCntrMap.find(dbName);
+			if (itr != updateCntrMap.end())
+			{
+				int count = itr->second;
+
+				if (++count == optimize_count)
+				{
+					optimize(dbName);
+					count = 0;
+				}
+
+				updateCntrMap[dbName] = count;
+			}
+			else
+				updateCntrMap[dbName] = 0; // first time through, count from zero
+
+			update_index(dbName);
+
+		}
+		else if (type.compare("deleted") == 0)
+		{
+			// delete clucene index
+			if ((this->indexDir->c_str())[indexDir->length() - 1] == '/')
+				tmpStr << indexDir->c_str() << dbName.c_str();
+			else
+				tmpStr << indexDir->c_str() << "/" << dbName.c_str();
+
+			const std::string& tmp = tmpStr.str();
+			const char* target = tmp.c_str();
+
+			if (IndexReader::indexExists(target) != false)
+			{
+				WhitespaceAnalyzer an;
+				IndexWriter* writer = _CLNEW IndexWriter(target, &an, true);
+
+				Directory* dir = writer->getDirectory();
+				vector<string> allFiles;
+			    dir->list(allFiles);
+
+				for (vector<string>::iterator it = allFiles.begin(); it!=allFiles.end(); ++it) {
+					dir->deleteFile(it->c_str(), false);
+				}
+
+				writer->close();
+				_CLDELETE(writer);
+
+				// remove the directory
+				RMDIR(target);
+				
+				// remove updateCntrMap entry for this db
+				updateCntrMap.erase(dbName);
+
+			}
+
+		}
+		else
+		{
+			write_error("message type not recognised", 400);
+		}
 	}
 	else
 	{
-		// TODO format error json, strip out all newlines
-		//reader.getFormatedErrorMessages();
-		cerr << "JSON PARSE ERROR " << request.c_str() << endl;
+		write_error(reader.getFormatedErrorMessages(), 400);
 	}
 }
 
+void CouchLuceneUpdater::optimize(string index)
+{
+	IndexReader* reader = NULL;
+	WhitespaceAnalyzer an;
+	std::stringstream tmpStr;
+
+	if ((this->indexDir->c_str())[indexDir->length() - 1] == '/')
+		tmpStr << indexDir->c_str() << index.c_str();
+	else
+		tmpStr << indexDir->c_str() << "/" << index.c_str();
+
+	const std::string& tmp = tmpStr.str();
+	const char* target = tmp.c_str();
+
+	if (IndexReader::indexExists(target) == false)
+	{
+		// create a new index
+		IndexWriter* writer = _CLNEW IndexWriter(target, &an, true);
+		writer->close();
+		_CLDELETE(writer);
+	}
+	else
+	{
+		// optimise the index
+		IndexWriter *writer = _CLNEW IndexWriter(target, &an, false);
+		writer->optimize();
+		writer->close();
+		_CLDELETE(writer);
+
+	}
+
+}
 
 void CouchLuceneUpdater::update_index(string index)
 {
@@ -196,9 +313,6 @@ void CouchLuceneUpdater::update_index(string index)
 		wrtr->close();
 		_CLDELETE(wrtr);
 	}
-
-	if (IndexReader::isLocked(target) == true)
-		IndexReader::unlock(target);
 
 	// read the current seq_num
 	reader = IndexReader::open(target);
@@ -276,7 +390,6 @@ void CouchLuceneUpdater::write_doc(const char* target, Document* doc, Analyzer* 
 	IndexWriter *writer = _CLNEW IndexWriter(target , an, create);
 	writer->addDocument(doc);
 	writer->flush();
-	writer->optimize();
 	writer->close();
 	_CLDELETE(writer);
 }
@@ -349,9 +462,6 @@ long CouchLuceneUpdater::addChanges(const char* target, const char* since_seq_nu
 				{
 				
 					const TCHAR* wId_string = wtmp.c_str();
-
-					if (IndexReader::isLocked(target) == true)
-						IndexReader::unlock(target);
 
 					// read the current seq_num
 					reader = IndexReader::open(target);
@@ -495,10 +605,7 @@ long CouchLuceneUpdater::addChanges(const char* target, const char* since_seq_nu
 	  }
 	  else
 	  {
-			// parsing failed
-		  	// TODO format error json, strip out all newlines
-			//reader.getFormatedErrorMessages();
-			cerr << "JSON PARSE ERROR " << endl;
+		write_error(rdr.getFormatedErrorMessages(), 400);
 	  }
 
 	  curl_easy_cleanup(curl_handle);
@@ -650,21 +757,20 @@ void CouchLuceneUpdater::get_design_docs()
 					else
 					{
 						// parsing failed
-		  				// TODO format error json, strip out all newlines
-						//reader.getFormatedErrorMessages();
-						cerr << "JSON PARSE ERROR " << url_design_str << endl;
+						write_error(reader.getFormatedErrorMessages(), 400);
 					}
 				}
 				else
-					cerr << "ERROR getting design docs for url " << url.str().c_str() << " result code " << res << " " << errorBuffer << endl;
+				{
+					write_error("error getting design docs", 500);
+				}
 			}
 		}
 		else
 		{
+
 			// parsing failed
-		  	// TODO format error json, strip out all newlines
-			//reader.getFormatedErrorMessages();
-			cerr << "JSON PARSE ERROR " << endl;
+			write_error(reader.getFormatedErrorMessages(), 400);
 		}
 
 		curl_easy_cleanup(curl_handle);
@@ -774,7 +880,7 @@ void CouchLuceneQuery::handle_request(const string &request)
 		"userCtx":{"db":"test","name":null,"roles":["_admin"]}}
 */
 
-	standard::StandardAnalyzer analyzer;
+	WhitespaceAnalyzer analyzer;
 
 	// parse the incoming json
 	Json::Value root;
@@ -831,9 +937,6 @@ void CouchLuceneQuery::handle_request(const string &request)
 				const std::string& tmpTgt = tmpStr.str();
 				const char* target = tmpTgt.c_str();
 
-				if (IndexReader::isLocked(target) == true)
-					IndexReader::unlock(target);
-
 				IndexReader* reader = IndexReader::open(target);
 				IndexSearcher s(reader);
 				
@@ -846,7 +949,6 @@ void CouchLuceneQuery::handle_request(const string &request)
 				wQueryStream << queryString.c_str();
 				const std::wstring& tmp = wQueryStream.str();
 				const TCHAR* wquery_string = tmp.c_str();
-
 
 				Query* query = QueryParser::parse(wquery_string, wfld_string, &analyzer);	
 				Hits* h = s.search(query);
@@ -959,8 +1061,6 @@ void CouchLuceneQuery::handle_request(const string &request)
 					string output = writer.write(objResult);
 					cout << output.c_str() << endl;
 				}
-
-
 			}
 			else
 			{
@@ -974,10 +1074,7 @@ void CouchLuceneQuery::handle_request(const string &request)
 	}
 	else
 	{
-		// TODO format error json, strip out all newlines
-		//reader.getFormatedErrorMessages();
-		cerr << "JSON PARSE ERROR " << request.c_str() << endl;
-		cout << "{\"code\" : 500, \"body\":\"" << "error parsing json" << "\"}" << endl;
+		write_error(reader.getFormatedErrorMessages(), 400);
 	}
 }
 

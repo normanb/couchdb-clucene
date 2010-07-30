@@ -1,6 +1,5 @@
 /**
 * Simple wrapper around CLucene - http://clucene.sourceforge.net/
-* Using Cajun - http://sourceforge.net/projects/cajun-jsonapi/
 */
 #include <iostream>
 #include <string>
@@ -30,8 +29,9 @@ int main(int argc, const char * argv[])
 	string update = string("update");
 	string indexDir;
 	int mode = 0; // update mode get design docs
+	int optimize_count = 1000;
 
-	if(argc != 3)
+	if(argc < 3)
     {
 		cerr << "incorrect number of arguments" << endl;
         cerr << "usage: " << argv[0] << " <index_directory>" << " mode" << endl;
@@ -41,19 +41,23 @@ int main(int argc, const char * argv[])
     {
 		indexDir	= string(argv[1]);
 
+		if (argc == 4)
+			optimize_count = atoi(argv[3]);
+
 		// execute clucene storing index in argv[1]
 		// mode is in argv[2]
 		if (update.compare(argv[2]) == 0)
 		{
 			// update
 			mode = 1; // flag that we need to get the design docs
-			couch = new CouchLuceneUpdater(&indexDir);	
+			couch = new CouchLuceneUpdater(&indexDir, optimize_count);	
 		}
 		else
 		{
 			// query
 			couch = new CouchLuceneQuery(&indexDir);
 		}
+
 
 		while (1)
 		{		
@@ -66,7 +70,19 @@ int main(int argc, const char * argv[])
 					((CouchLuceneUpdater*)couch)->get_design_docs();
 					mode = 0;
 				}
-                couch->handle_request(line);
+				try {
+					couch->handle_request(line);
+				} catch (CLuceneError &e) {
+
+					Json::Value response;
+					response["code"] = 500;
+					response["body"] = e.what();
+					Json::FastWriter writer;
+
+					// Make a new JSON document.
+					std::string output = writer.write( response );
+					cout << output.c_str() << endl; 
+				}
 			}
 			else
                 break;
