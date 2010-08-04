@@ -142,12 +142,12 @@ CouchLuceneUpdater::CouchLuceneUpdater(string* dir, int count)
 	 /* Create a JS runtime. */
     rt = JS_NewRuntime(8L * 1024L * 1024L);
     if (rt == NULL)
-        cerr << "Error creating JS Runtime" << endl;
+   	  write_error("Error creating JS Runtime", 500);
 
     /* Create a context. */
     cx = JS_NewContext(rt, 8192);
     if (cx == NULL)
-         cerr << "Error creating JS Context" << endl;
+		write_error("Error creating JS Context", 500);
 
     JS_SetErrorReporter(cx, reportError);
 	
@@ -156,12 +156,12 @@ CouchLuceneUpdater::CouchLuceneUpdater(string* dir, int count)
     /* Create the global object. */
     global = JS_NewObject(cx, &global_class, NULL, NULL);
     if (global == NULL)
-        cerr << "Error creating JS global object" << endl;
+		write_error("Error creating JS global object", 500);
 
     /* Populate the global object with the standard globals,
        like Object and Array. */
     if (!JS_InitStandardClasses(cx, global))
-         cerr << "Error initialising JS standard classes" << endl;
+		write_error("Error initialising JS standard classes", 500);
 
 }
 
@@ -620,7 +620,11 @@ void CouchLuceneUpdater::parseFTI(const string* dbName, const string* designDocN
 	for (int idxFti = 0; idxFti < ftiObject.size(); ++idxFti ) 
 	{
 
-		string name = ftiObject.getMemberNames()[idxFti]; // this is the query term
+		string name = ftiObject.getMemberNames()[idxFti]; // this is part of the query term
+
+		// remove _design prefix
+		string term = (*dbName + "_" + name);
+
 		Json::Value member = ftiObject[name];
 
 		Field::Store store = Field::STORE_YES;
@@ -658,7 +662,9 @@ void CouchLuceneUpdater::parseFTI(const string* dbName, const string* designDocN
 			uintN lineno = 0;
 
 			ostringstream js_stream;
-			js_stream << "var " << name.c_str() << "=" << js << ";";
+			// remove _design from ddoc
+			js_stream << "var " << term.c_str() << "=" << js << ";";
+			//js_stream << "var " << name.c_str() << "=" << js << ";";
 			const std::string& tmp = js_stream.str();
 			const char* js_string = tmp.c_str();
 			JSBool ok;
@@ -666,14 +672,17 @@ void CouchLuceneUpdater::parseFTI(const string* dbName, const string* designDocN
 			ok = JS_EvaluateScript(cx, global, js_string , strlen(js_string),
 											filename, lineno, &result);
 			if (!ok)
-				cerr << "FTI - Error parsing script" << js_string << endl;
+			{
+				wostringstream w;
+				w << js_string;
 
-			wostringstream jsstream;
-			jsstream << js;
+				MessageBox(NULL, w.str().c_str(), _T("FTI"), NULL);
+				write_error(js_string, 500);
+			}
 		}
 
 		// fti member map looks like  dbName, (designId, (term name, defaults)
-		ftiMap[*dbName][*designDocName][name] = store;
+		ftiMap[*dbName][*designDocName][term.c_str()] = store;
 	}
 }
 
@@ -941,11 +950,12 @@ void CouchLuceneQuery::handle_request(const string &request)
 				IndexSearcher s(reader);
 				
 				wostringstream wFld_stream;
-				wFld_stream << term.c_str();
+				wFld_stream << (db + "_" + term).c_str();
 				const wstring& wFldTmp_string = wFld_stream.str();
 				const wchar_t* wfld_string = wFldTmp_string.c_str();
 
 				wostringstream wQueryStream;
+
 				wQueryStream << queryString.c_str();
 				const std::wstring& tmp = wQueryStream.str();
 				const TCHAR* wquery_string = tmp.c_str();
