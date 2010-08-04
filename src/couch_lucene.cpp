@@ -675,8 +675,6 @@ void CouchLuceneUpdater::parseFTI(const string* dbName, const string* designDocN
 			{
 				wostringstream w;
 				w << js_string;
-
-				MessageBox(NULL, w.str().c_str(), _T("FTI"), NULL);
 				write_error(js_string, 500);
 			}
 		}
