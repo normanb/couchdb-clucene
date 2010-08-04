@@ -6,7 +6,7 @@ CFLAGS = -DXP_UNIX $(INCLUDES)
 
 SRC = src
 
-ARCHIVES = -lclucene-core -lclucene-shared -lcurl -ljs
+ARCHIVES = -lclucene-core -lclucene-shared -lcurl -ljs -ljsoncpp
 
 fti:  fti.o
 	$(CC) $(CFLAGS) -dy -o fti fti.o couch_lucene.o $(ARCHIVES)
